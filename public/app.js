@@ -40,7 +40,7 @@ function render() {
     const span = document.createElement('span');
     span.className = 'ghost';
     span.textContent = ghost;
-    const count = altsState === 'loading' ? `${idx + 1}/…` : suggestions.length > 1 ? `${idx + 1}/${suggestions.length}` : '';
+    const count = altsState === 'loading' ? `${idx + 1}/…` : (suggestions.length > 1 || altsState === 'done') ? `${idx + 1}/${suggestions.length}` : '';
     span.dataset.label = count ? `${count}  Tab` : 'Tab';
     mirror.append(v.slice(0, ghostPos), span, v.slice(ghostPos) + '​');
   } else {
@@ -91,7 +91,7 @@ function cacheKey(before, after, n = 1) {
   return before.slice(-400) + '\u0000' + after.slice(0, 80) + '\u0000' + settings.length + '\u0000' + n;
 }
 
-async function fetchCompletions(before, after, n, signal) {
+async function fetchCompletions(before, after, n, signal, exclude = []) {
   const headers = { 'content-type': 'application/json' };
   if (settings.apiKey) headers['x-api-key'] = settings.apiKey;
   const res = await fetch('/api/complete', {
@@ -99,7 +99,7 @@ async function fetchCompletions(before, after, n, signal) {
     signal,
     headers,
     body: JSON.stringify({
-      before, after, n,
+      before, after, n, exclude,
       docs: docs.filter((d) => d.on).map(({ name, text }) => ({ name, text })),
       instructions: settings.instructions,
       length: settings.length,
@@ -171,12 +171,12 @@ async function cycle(dir) {
       render();
       setStatus('busy');
       try {
-        const out = await fetchCompletions(before, after, ALTS, ctl.signal);
+        const out = await fetchCompletions(before, after, ALTS, ctl.signal, [shown]);
         remember(key, out.texts);
         if (ctl.signal.aborted || ta.value !== v || caret() !== pos) return;
         const list = mergeAlts(suggestions, out.texts);
         setSuggestions(list, pos, list.indexOf(shown), 'done');
-        setStatus('ok', `${list.length} suggestion${list.length === 1 ? '' : 's'} · ${out.ms} ms`);
+        setStatus('ok', list.length > 1 ? `${list.length} suggestions · ${out.ms} ms` : 'No other suggestions for this spot');
       } catch (err) {
         if (err.name === 'AbortError') return;
         altsState = 'none';

@@ -1,6 +1,6 @@
 // Provider registry. To add one (OpenAI, Anthropic, local llama.cpp...), write a
 // module exporting create<Name>Provider(env) that returns
-//   { name, model, complete({ system, user, maxTokens, signal, apiKey, model, n }) -> { texts: string[] } }
+//   { name, model, complete({ system, user, maxTokens, signal, apiKey, model, n, temperature }) -> { texts: string[] } }
 // n > 1 asks for that many alternative completions (used for Alt+[ / Alt+]).
 // and register it below.
 import { createGeminiProvider } from './gemini.js';

@@ -42,16 +42,35 @@ async function handleComplete(req, res) {
   const prompt = buildPrompt(body);
   const t0 = performance.now();
   try {
-    const out = await provider.complete({
+    const opts = {
       ...prompt,
       signal: ac.signal,
       apiKey: req.headers['x-api-key'] || undefined,
       model: typeof body.model === 'string' && body.model.trim() ? body.model.trim() : undefined,
-      n: Math.min(Math.max(Number(body.n) || 1, 1), 5),
-    });
-    // Clean, drop empties and duplicates; keep the model's order.
-    const texts = [...new Set((out.texts || []).map((t) =>
-      cleanCompletion(t, { before: body.before, after: body.after, maxWords: prompt.maxWords })).filter(Boolean))];
+    };
+    const n = Math.min(Math.max(Number(body.n) || 1, 1), 5);
+    const clean = (list) => (list || []).map((t) =>
+      cleanCompletion(t, { before: body.before, after: body.after, maxWords: prompt.maxWords })).filter(Boolean);
+    const exclude = new Set(Array.isArray(body.exclude) ? body.exclude : []);
+    const fresh = (list) => list.filter((t) => !exclude.has(t));
+
+    const out = await provider.complete({ ...opts, n });
+    let texts = [...new Set(clean(out.texts))];
+
+    // Alternatives: models often return duplicates (or a single candidate) for
+    // short completions. Top up with independent, hotter samples until we have
+    // enough distinct ones, at most two rounds.
+    for (let round = 0; n > 1 && round < 2 && fresh(texts).length < n - 1; round++) {
+      const need = n - fresh(texts).length;
+      const more = await Promise.all(Array.from({ length: need }, () =>
+        provider.complete({ ...opts, n: 1, temperature: 1.0 }).catch((err) => {
+          if (ac.signal.aborted) throw err;
+          return { texts: [] };
+        })));
+      texts = [...new Set([...texts, ...clean(more.flatMap((o) => o.texts || []))])];
+    }
+    if (n > 1) texts = fresh(texts);
+
     json(res, 200, { texts, text: texts[0] || '', ms: Math.round(performance.now() - t0), cachedTokens: out.usage?.cachedContentTokenCount || 0 });
   } catch (err) {
     if (ac.signal.aborted || err.name === 'AbortError') return; // client is gone
