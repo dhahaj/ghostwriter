@@ -1,0 +1,14 @@
+{
+  "name": "ghostwriter",
+  "version": "0.1.0",
+  "description": "A writing app with inline AI ghost-text predictions (Tab to accept).",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=18.17" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "mock": "PROVIDER=mock node server.js",
+    "test": "node --test \"test/*.test.js\""
+  }
+}

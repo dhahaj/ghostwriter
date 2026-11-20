@@ -1,0 +1,124 @@
+:root {
+  --bg: #fbfaf7;
+  --surface: #ffffff;
+  --ink: #1d1c1a;
+  --muted: #74706a;
+  --ghost: #a39e96;
+  --line: #e7e3dc;
+  --accent: #3b5bdb;
+  --ok: #2f9e44;
+  --warn: #e8590c;
+  --err: #e03131;
+  --sel: #d0dcff;
+  --font-text: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, ui-serif, serif;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161514; --surface: #1f1e1c; --ink: #ece9e4; --muted: #9a958d;
+    --ghost: #6f6a63; --line: #2e2c29; --accent: #7c95ff; --sel: #2c3a6b;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-ui); }
+body { min-height: 100vh; display: flex; flex-direction: column; }
+
+.bar {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 16px;
+  padding: 10px 20px; background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px); border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 600; letter-spacing: .2px; }
+.logo { color: var(--accent); }
+.status { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); min-width: 0; }
+.status #statusText { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.status.ok .dot { background: var(--ok); }
+.status.busy .dot { background: var(--accent); animation: pulse 1s infinite; }
+.status.err .dot { background: var(--err); }
+.status.err { color: var(--err); }
+@keyframes pulse { 50% { opacity: .3; } }
+.actions { margin-left: auto; display: flex; gap: 6px; }
+.btn {
+  font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--line); font-size: 11px; text-align: center; }
+
+.page { flex: 1; width: 100%; max-width: 760px; margin: 0 auto; padding: 48px 24px 120px; }
+.title {
+  width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink);
+  font: 600 32px/1.25 var(--font-text); margin-bottom: 20px;
+}
+
+/* The editor: a transparent textarea over a mirror that renders text + ghost.
+   Both must share identical text metrics. */
+.editor { position: relative; }
+.mirror, .input {
+  font: 19px/1.7 var(--font-text); letter-spacing: normal; tab-size: 4;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
+  padding: 0; margin: 0; border: 0; width: 100%;
+}
+.mirror { min-height: 50vh; color: var(--ink); pointer-events: none; }
+.input {
+  position: absolute; inset: 0; height: 100%; resize: none; overflow: hidden;
+  background: transparent; color: transparent; caret-color: var(--ink); outline: none;
+}
+.input::placeholder { color: var(--ghost); }
+.input::selection { background: var(--sel); color: transparent; }
+.ghost { color: var(--ghost); }
+.ghost::after {
+  content: "Tab"; font: 600 10px/1 var(--font-ui); color: var(--muted); border: 1px solid var(--line);
+  border-radius: 4px; padding: 2px 4px; margin-left: 6px; vertical-align: 3px;
+}
+
+.foot {
+  position: fixed; bottom: 0; left: 0; right: 0; display: flex; gap: 18px; align-items: center;
+  padding: 8px 20px; font-size: 12px; color: var(--muted);
+  background: color-mix(in srgb, var(--bg) 90%, transparent); border-top: 1px solid var(--line);
+}
+.foot .spacer { flex: 1; }
+kbd { font: 11px var(--font-ui); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--surface); }
+
+.panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(380px, 100vw); z-index: 10; overflow-y: auto;
+  background: var(--surface); border-left: 1px solid var(--line); padding: 18px 20px; box-shadow: -12px 0 30px rgba(0,0,0,.08);
+}
+.panel-head { display: flex; align-items: center; }
+.panel h2, .settings h2 { font-size: 17px; margin: 0; }
+.icon { margin-left: auto; font-size: 22px; background: none; border: 0; color: var(--muted); cursor: pointer; }
+.muted { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.small { font-size: 12px; }
+.drop {
+  display: block; text-align: center; padding: 22px; margin: 12px 0; cursor: pointer; font-size: 14px;
+  border: 1.5px dashed var(--line); border-radius: 10px; color: var(--muted);
+}
+.drop.over, .drop:hover { border-color: var(--accent); color: var(--ink); }
+.paste summary { cursor: pointer; font-size: 13px; color: var(--accent); margin-bottom: 8px; }
+.paste input, .paste textarea, .settings input, .settings select, .settings textarea {
+  width: 100%; font: 14px var(--font-ui); padding: 8px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); margin: 4px 0 8px;
+}
+.docs { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 8px; }
+.docs li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.docs li.off { opacity: .5; }
+.docs .meta { flex: 1; min-width: 0; }
+.docs .name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.docs .size { font-size: 12px; color: var(--muted); }
+.docs button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 18px; }
+
+dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; background: var(--surface); color: var(--ink); width: min(440px, 92vw); }
+dialog::backdrop { background: rgba(0,0,0,.25); }
+.settings { padding: 20px; display: grid; gap: 6px; }
+.settings label { font-size: 13px; font-weight: 500; display: grid; }
+.settings menu { padding: 0; margin: 8px 0 0; display: flex; justify-content: flex-end; }
+
+@media (max-width: 640px) {
+  .foot span:not(#words):not(.spacer) { display: none; }
+  .bar { padding: 10px 12px; gap: 8px; }
+  .brand { display: none; }
+  .page { padding: 28px 16px 100px; }
+}

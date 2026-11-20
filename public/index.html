@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ghostwriter</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><span class="logo" aria-hidden="true">✎</span> Ghostwriter</div>
+    <div class="status" id="status" title="Completion status"><span class="dot"></span><span id="statusText">Starting…</span></div>
+    <nav class="actions">
+      <button id="btnContext" class="btn" aria-controls="contextPanel">Context <span id="ctxCount" class="badge">0</span></button>
+      <button id="btnOpen" class="btn">Open</button>
+      <button id="btnSave" class="btn">Save</button>
+      <button id="btnSettings" class="btn">Settings</button>
+      <input id="fileOpen" type="file" accept=".txt,.md,.markdown,.text,text/plain,text/markdown" hidden />
+    </nav>
+  </header>
+
+  <main class="page">
+    <input id="title" class="title" placeholder="Untitled" spellcheck="false" />
+    <div class="editor" id="editor">
+      <div class="mirror" id="mirror" aria-hidden="true"></div>
+      <textarea id="text" class="input" spellcheck="true" placeholder="Start writing. Suggestions appear in grey; press Tab to accept."></textarea>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <span><kbd>Tab</kbd> accept</span>
+    <span><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>→</kbd> accept word</span>
+    <span><kbd>Esc</kbd> dismiss</span>
+    <span><kbd>Alt</kbd> + <kbd>\</kbd> suggest now</span>
+    <span class="spacer"></span>
+    <span id="words">0 words</span>
+  </footer>
+
+  <aside class="panel" id="contextPanel" hidden>
+    <div class="panel-head">
+      <h2>Context</h2>
+      <button class="icon" data-close aria-label="Close">×</button>
+    </div>
+    <p class="muted">Documents here are sent with every prediction, so suggestions use your names, facts and voice. Text files only for now (.txt, .md).</p>
+    <label class="drop" id="drop">
+      <input id="fileCtx" type="file" multiple accept=".txt,.md,.markdown,.text,.csv,.json,.html,text/*" hidden />
+      <strong>Add files</strong> or drop them here
+    </label>
+    <details class="paste">
+      <summary>Paste text instead</summary>
+      <input id="pasteName" placeholder="Name (e.g. Style guide)" />
+      <textarea id="pasteText" rows="6" placeholder="Paste notes, an outline, earlier chapters…"></textarea>
+      <button id="pasteAdd" class="btn primary">Add</button>
+    </details>
+    <ul class="docs" id="docs"></ul>
+    <p class="muted small" id="ctxSize"></p>
+  </aside>
+
+  <dialog id="settings">
+    <form method="dialog" class="settings">
+      <h2>Settings</h2>
+      <label>Suggestions
+        <select id="optEnabled"><option value="on">On</option><option value="off">Off</option></select>
+      </label>
+      <label>Suggestion length
+        <select id="optLength">
+          <option value="short">Short (finish the phrase)</option>
+          <option value="sentence">Sentence</option>
+          <option value="long">Long (a few sentences)</option>
+        </select>
+      </label>
+      <label>Delay after typing <span id="delayVal"></span>
+        <input id="optDelay" type="range" min="100" max="1000" step="50" />
+      </label>
+      <label>Model
+        <input id="optModel" placeholder="server default" spellcheck="false" />
+      </label>
+      <label>Gemini API key
+        <input id="optKey" type="password" placeholder="Uses the server's GEMINI_API_KEY if blank" autocomplete="off" spellcheck="false" />
+        <span class="muted small">Stored only in this browser and sent only to your local server. Prefer the .env file.</span>
+      </label>
+      <label>Standing instructions
+        <textarea id="optInstr" rows="3" placeholder="e.g. Plain, warm tone. British spelling. Second person."></textarea>
+      </label>
+      <menu><button class="btn primary" value="ok">Done</button></menu>
+    </form>
+  </dialog>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
