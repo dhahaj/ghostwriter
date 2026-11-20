@@ -15,36 +15,53 @@ const settings = Object.assign(
 let docs = store.get('docs', []); // [{ id, name, text, on }]
 
 // ---------- suggestion state ----------
-let ghost = '';          // text currently suggested
+// The ghost is one of several alternatives; Alt+] / Alt+[ cycle through them.
+let suggestions = [];    // alternative completions at ghostPos
+let idx = 0;             // which one is showing
 let ghostPos = -1;       // caret index the ghost is anchored to
+let altsState = 'none';  // none | loading | done (have we fetched alternatives?)
+let altsCtl = null;      // AbortController for the alternatives request
 let timer = 0;
 let inflight = null;     // AbortController
 let reqSeq = 0;
 let accepting = false;
-const cache = new Map(); // prefix-key -> completion (small LRU)
+const cache = new Map(); // prefix-key -> string[] (small LRU)
+const ALTS = 4;          // how many alternatives to ask for when cycling
+
+const current = () => suggestions[idx] || '';
+let ghost = '';          // mirrors current(); kept for readability below
 
 // ---------- rendering ----------
 function render() {
   const v = ta.value;
+  ghost = current();
   mirror.textContent = '';
   if (ghost && ghostPos >= 0 && ghostPos <= v.length) {
     const span = document.createElement('span');
     span.className = 'ghost';
     span.textContent = ghost;
+    const count = altsState === 'loading' ? `${idx + 1}/…` : suggestions.length > 1 ? `${idx + 1}/${suggestions.length}` : '';
+    span.dataset.label = count ? `${count}  Tab` : 'Tab';
     mirror.append(v.slice(0, ghostPos), span, v.slice(ghostPos) + '​');
   } else {
     mirror.append(v + '​');
   }
 }
 
-function setGhost(text, pos) {
-  ghost = text || '';
-  ghostPos = ghost ? pos : -1;
+function setSuggestions(list, pos, i = 0, alts = 'none') {
+  suggestions = (list || []).filter(Boolean);
+  idx = Math.min(i, Math.max(suggestions.length - 1, 0));
+  ghostPos = suggestions.length ? pos : -1;
+  if (altsState !== alts) { altsCtl?.abort(); altsCtl = null; }
+  altsState = suggestions.length ? alts : 'none';
   render();
 }
 
+// Back-compat helper: show a single suggestion.
+function setGhost(text, pos) { setSuggestions(text ? [text] : [], pos); }
+
 function clearGhost() {
-  if (ghost) setGhost('');
+  if (suggestions.length) setSuggestions([]);
 }
 
 // ---------- when to suggest ----------
@@ -70,8 +87,29 @@ function schedule(immediate = false) {
   timer = setTimeout(() => request(pos), immediate ? 0 : settings.delay);
 }
 
-function cacheKey(before, after) {
-  return before.slice(-400) + '\u0000' + after.slice(0, 80) + '\u0000' + settings.length;
+function cacheKey(before, after, n = 1) {
+  return before.slice(-400) + '\u0000' + after.slice(0, 80) + '\u0000' + settings.length + '\u0000' + n;
+}
+
+async function fetchCompletions(before, after, n, signal) {
+  const headers = { 'content-type': 'application/json' };
+  if (settings.apiKey) headers['x-api-key'] = settings.apiKey;
+  const res = await fetch('/api/complete', {
+    method: 'POST',
+    signal,
+    headers,
+    body: JSON.stringify({
+      before, after, n,
+      docs: docs.filter((d) => d.on).map(({ name, text }) => ({ name, text })),
+      instructions: settings.instructions,
+      length: settings.length,
+      model: settings.model,
+      title: $('title').value,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return { texts: data.texts || (data.text ? [data.text] : []), ms: data.ms, cachedTokens: data.cachedTokens };
 }
 
 async function request(pos) {
@@ -80,8 +118,8 @@ async function request(pos) {
   const after = v.slice(pos);
   const key = cacheKey(before, after);
   if (cache.has(key)) {
-    const hit = cache.get(key);
-    if (hit) setGhost(hit, pos);
+    const alts = cache.get(cacheKey(before, after, ALTS));
+    setSuggestions(alts ? mergeAlts(cache.get(key), alts) : cache.get(key), pos, 0, alts ? 'done' : 'none');
     return setStatus('ok', 'cached');
   }
 
@@ -90,28 +128,12 @@ async function request(pos) {
   inflight = ac;
   setStatus('busy');
   try {
-    const headers = { 'content-type': 'application/json' };
-    if (settings.apiKey) headers['x-api-key'] = settings.apiKey;
-    const res = await fetch('/api/complete', {
-      method: 'POST',
-      signal: ac.signal,
-      headers,
-      body: JSON.stringify({
-        before, after,
-        docs: docs.filter((d) => d.on).map(({ name, text }) => ({ name, text })),
-        instructions: settings.instructions,
-        length: settings.length,
-        model: settings.model,
-        title: $('title').value,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    remember(key, data.text);
+    const out = await fetchCompletions(before, after, 1, ac.signal);
+    remember(key, out.texts);
     // Drop stale answers: the text or caret moved while we waited.
     if (seq !== reqSeq || ta.value !== v || caret() !== pos) return;
-    setGhost(data.text, pos);
-    setStatus('ok', data.text ? `${data.ms} ms${data.cachedTokens ? ` · ${data.cachedTokens} cached tokens` : ''}` : 'no suggestion');
+    setSuggestions(out.texts, pos);
+    setStatus('ok', out.texts.length ? `${out.ms} ms${out.cachedTokens ? ` · ${out.cachedTokens} cached tokens` : ''}` : 'no suggestion');
   } catch (err) {
     if (err.name === 'AbortError') return;
     setStatus('err', err.message);
@@ -120,9 +142,68 @@ async function request(pos) {
   }
 }
 
-function remember(key, text) {
-  cache.set(key, text);
+function mergeAlts(first, more) {
+  return [...new Set([...(first || []), ...(more || [])])];
+}
+
+// Alt+] / Alt+[: move through alternatives, fetching them on first use.
+async function cycle(dir) {
+  const pos = caret();
+  if (pos < 0) return;
+  if (!suggestions.length) {
+    // Nothing showing yet: ask now, then let the next press cycle.
+    if (canSuggest(pos)) schedule(true);
+    return;
+  }
+  if (altsState === 'none') {
+    const v = ta.value;
+    const before = v.slice(0, pos);
+    const after = v.slice(pos);
+    const key = cacheKey(before, after, ALTS);
+    const cached = cache.get(key);
+    if (cached) {
+      setSuggestions(mergeAlts(suggestions, cached), pos, idx, 'done');
+    } else {
+      const shown = current();
+      altsState = 'loading';
+      altsCtl = new AbortController();
+      const ctl = altsCtl;
+      render();
+      setStatus('busy');
+      try {
+        const out = await fetchCompletions(before, after, ALTS, ctl.signal);
+        remember(key, out.texts);
+        if (ctl.signal.aborted || ta.value !== v || caret() !== pos) return;
+        const list = mergeAlts(suggestions, out.texts);
+        setSuggestions(list, pos, list.indexOf(shown), 'done');
+        setStatus('ok', `${list.length} suggestion${list.length === 1 ? '' : 's'} · ${out.ms} ms`);
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        altsState = 'none';
+        render();
+        return setStatus('err', err.message);
+      } finally {
+        if (altsCtl === ctl) altsCtl = null;
+      }
+    }
+  }
+  if (suggestions.length > 1) {
+    idx = (idx + dir + suggestions.length) % suggestions.length;
+    render();
+  }
+}
+
+function remember(key, texts) {
+  cache.set(key, texts);
   if (cache.size > 200) cache.delete(cache.keys().next().value);
+}
+
+// After `typed` is inserted at the ghost, keep only alternatives that still fit.
+function narrow(typed) {
+  const shown = current().slice(typed.length);
+  const list = suggestions.filter((s) => s.startsWith(typed)).map((s) => s.slice(typed.length)).filter(Boolean);
+  const pos = ghostPos + typed.length;
+  setSuggestions(list, pos, Math.max(list.indexOf(shown), 0), altsState === 'loading' ? 'none' : altsState);
 }
 
 // ---------- accepting ----------
@@ -139,50 +220,53 @@ function insert(text) {
 }
 
 function acceptAll() {
-  const text = ghost;
-  setGhost('');
+  const text = current();
+  setSuggestions([]);
   insert(text);
   autosize();
   schedule(); // chain the next suggestion
 }
 
 function acceptWord() {
-  const m = ghost.match(/^\s*\S+/);
+  const m = current().match(/^\s*\S+/);
   if (!m) return acceptAll();
   const part = m[0];
-  const rest = ghost.slice(part.length);
-  const pos = ghostPos + part.length;
-  ghost = '';
+  narrow(part);
+  const keep = { list: suggestions, i: idx, pos: ghostPos, alts: altsState };
+  suggestions = [];
   insert(part);
-  if (rest) setGhost(rest, pos); else schedule();
+  if (keep.list.length) setSuggestions(keep.list, keep.pos, keep.i, keep.alts); else schedule();
   autosize();
 }
 
 // ---------- events ----------
 ta.addEventListener('keydown', (e) => {
-  if (ghost && caret() === ghostPos) {
-    if (e.key === 'Tab' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); return acceptAll(); }
+  const plain = !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
+  // e.code so Option+[ works on macOS keyboards too.
+  if (e.altKey && !e.ctrlKey && !e.metaKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
+    e.preventDefault();
+    return cycle(e.code === 'BracketRight' ? 1 : -1);
+  }
+  if (e.altKey && e.code === 'Backslash') { e.preventDefault(); return schedule(true); }
+  if (suggestions.length && caret() === ghostPos) {
+    if (e.key === 'Tab' && plain) { e.preventDefault(); return acceptAll(); }
     if (e.key === 'ArrowRight' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); return acceptWord(); }
     if (e.key === 'Escape') { e.preventDefault(); clearGhost(); clearTimeout(timer); inflight?.abort(); return; }
   }
-  if (e.key === '\\' && e.altKey) { e.preventDefault(); return schedule(true); }
-  if (e.key === 'Tab' && !ghost && !e.shiftKey) { e.preventDefault(); insert('\t'); }
+  if (e.key === 'Tab' && plain) { e.preventDefault(); insert('\t'); }
 });
 
 ta.addEventListener('input', (e) => {
   if (accepting) return;
-  // Typing through the suggestion keeps it alive (no new request).
-  if (ghost && e.inputType === 'insertText' && e.data && ghost.startsWith(e.data) && caret() === ghostPos + e.data.length) {
-    const rest = ghost.slice(e.data.length);
-    setGhost(rest, caret());
+  // Typing through the suggestion keeps it (and matching alternatives) alive.
+  if (suggestions.length && e.inputType === 'insertText' && e.data && current().startsWith(e.data) && caret() === ghostPos + e.data.length) {
+    narrow(e.data);
     autosize();
     save();
-    if (!rest) schedule();
+    if (!suggestions.length) schedule();
     return;
   }
-  ghost = '';
-  ghostPos = -1;
-  render();
+  setSuggestions([]);
   autosize();
   save();
   schedule();
@@ -190,7 +274,7 @@ ta.addEventListener('input', (e) => {
 
 document.addEventListener('selectionchange', () => {
   if (document.activeElement !== ta || accepting) return;
-  if (ghost && caret() !== ghostPos) { clearGhost(); schedule(); }
+  if (suggestions.length && caret() !== ghostPos) { clearGhost(); schedule(); }
 });
 ta.addEventListener('mousedown', () => { clearGhost(); });
 ta.addEventListener('blur', () => { clearGhost(); clearTimeout(timer); inflight?.abort(); });
@@ -382,4 +466,4 @@ ta.focus();
 ta.setSelectionRange(ta.value.length, ta.value.length);
 
 // For tests and debugging.
-window.__gw = { get ghost() { return ghost; }, get ghostPos() { return ghostPos; } };
+window.__gw = { get ghost() { return current(); }, get ghostPos() { return ghostPos; }, get count() { return suggestions.length; }, get index() { return idx; } };

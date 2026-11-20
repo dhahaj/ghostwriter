@@ -10,7 +10,7 @@ export function createMockProvider() {
   return {
     name: 'mock',
     model: 'mock',
-    async complete({ user, signal }) {
+    async complete({ user, signal, n = 1 }) {
       await new Promise((r, j) => {
         const t = setTimeout(r, 120);
         signal?.addEventListener('abort', () => { clearTimeout(t); j(Object.assign(new Error('aborted'), { name: 'AbortError' })); });
@@ -20,9 +20,10 @@ export function createMockProvider() {
       if (partial && partial.length >= 2) {
         const words = ['beginning', 'everything', 'morning', 'together', 'remember', 'something', 'however', 'because'];
         const w = words.find((x) => x.startsWith(partial.toLowerCase()) && x.length > partial.length);
-        if (w) return { text: w.slice(partial.length) };
+        if (w) return { texts: [w.slice(partial.length)] };
       }
-      return { text: LINES[before.length % LINES.length] };
+      const start = before.length % LINES.length;
+      return { texts: Array.from({ length: n }, (_, i) => LINES[(start + i) % LINES.length]) };
     },
   };
 }

@@ -71,7 +71,7 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
 .input::selection { background: var(--sel); color: transparent; }
 .ghost { color: var(--ghost); }
 .ghost::after {
-  content: "Tab"; font: 600 10px/1 var(--font-ui); color: var(--muted); border: 1px solid var(--line);
+  content: attr(data-label); white-space: pre; font: 600 10px/1 var(--font-ui); color: var(--muted); border: 1px solid var(--line);
   border-radius: 4px; padding: 2px 4px; margin-left: 6px; vertical-align: 3px;
 }
 

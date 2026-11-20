@@ -26,11 +26,16 @@ Try the UI without a key: `npm run mock`.
 | --- | --- |
 | Tab | Accept the whole suggestion |
 | Ctrl/⌘ + → | Accept the next word |
+| Alt + ] / Alt + [ | Next / previous alternative suggestion |
 | Esc | Dismiss |
 | Alt + \ | Ask for a suggestion now |
 | Ctrl/⌘ + Z | Undo an accept |
 
 Typing the same characters as the suggestion keeps it on screen without a new request.
+
+The first Alt + ] fetches a few alternatives in one call (Gemini `candidateCount`),
+so normal typing stays a single fast request. The ghost's badge shows which one
+you're on, e.g. `2/4`.
 
 ## Context documents
 
