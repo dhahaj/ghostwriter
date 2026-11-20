@@ -13,7 +13,7 @@ loadDotEnv(join(root, '.env'));
 
 const PORT = Number(process.env.PORT) || 5173;
 const HOST = process.env.HOST || '127.0.0.1';
-const provider = createProvider(process.env.PROVIDER);
+const provider = createProvider(process.argv.includes('--mock') ? 'mock' : process.env.PROVIDER);
 const PUBLIC = join(root, 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const MAX_BODY = 2_000_000;
@@ -47,9 +47,12 @@ async function handleComplete(req, res) {
       signal: ac.signal,
       apiKey: req.headers['x-api-key'] || undefined,
       model: typeof body.model === 'string' && body.model.trim() ? body.model.trim() : undefined,
+      n: Math.min(Math.max(Number(body.n) || 1, 1), 5),
     });
-    const text = cleanCompletion(out.text, { before: body.before, after: body.after, maxWords: prompt.maxWords });
-    json(res, 200, { text, ms: Math.round(performance.now() - t0), cachedTokens: out.usage?.cachedContentTokenCount || 0 });
+    // Clean, drop empties and duplicates; keep the model's order.
+    const texts = [...new Set((out.texts || []).map((t) =>
+      cleanCompletion(t, { before: body.before, after: body.after, maxWords: prompt.maxWords })).filter(Boolean))];
+    json(res, 200, { texts, text: texts[0] || '', ms: Math.round(performance.now() - t0), cachedTokens: out.usage?.cachedContentTokenCount || 0 });
   } catch (err) {
     if (ac.signal.aborted || err.name === 'AbortError') return; // client is gone
     json(res, err.status || 500, { error: err.message || 'Completion failed' });
