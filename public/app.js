@@ -9,7 +9,7 @@ const store = {
   set(k, v) { try { localStorage.setItem('gw.' + k, JSON.stringify(v)); return true; } catch { return false; } },
 };
 const settings = Object.assign(
-  { enabled: true, length: 'sentence', delay: 300, model: '', apiKey: '', instructions: '' },
+  { enabled: true, auto: true, length: 'sentence', delay: 300, model: '', apiKey: '', instructions: '' },
   store.get('settings', {}),
 );
 let docs = store.get('docs', []); // [{ id, name, text, on }]
@@ -69,8 +69,10 @@ function caret() {
   return ta.selectionStart === ta.selectionEnd ? ta.selectionStart : -1;
 }
 
-function canSuggest(pos) {
+function canSuggest(pos, manual = false) {
   if (!settings.enabled || pos < 0) return false;
+  // An explicit Ctrl+Space works anywhere, even mid-line or on an empty page.
+  if (manual) return true;
   const v = ta.value;
   const before = v.slice(0, pos);
   if (before.trim().length < 2 && !docs.some((d) => d.on)) return false;
@@ -79,11 +81,14 @@ function canSuggest(pos) {
   return /^[\s)\]}"'”’.,;:!?]*$/.test(restOfLine);
 }
 
-function schedule(immediate = false) {
+// manual = the user asked (Ctrl+Space / Alt+\). With auto-suggest off, only
+// manual requests go out.
+function schedule(immediate = false, manual = false) {
   clearTimeout(timer);
   if (inflight) { inflight.abort(); inflight = null; }
   const pos = caret();
-  if (!canSuggest(pos)) return setStatus('idle');
+  if (!manual && !settings.auto) return setStatus('idle');
+  if (!canSuggest(pos, manual)) return setStatus('idle');
   timer = setTimeout(() => request(pos), immediate ? 0 : settings.delay);
 }
 
@@ -152,7 +157,7 @@ async function cycle(dir) {
   if (pos < 0) return;
   if (!suggestions.length) {
     // Nothing showing yet: ask now, then let the next press cycle.
-    if (canSuggest(pos)) schedule(true);
+    if (canSuggest(pos, true)) schedule(true, true);
     return;
   }
   if (altsState === 'none') {
@@ -247,7 +252,10 @@ ta.addEventListener('keydown', (e) => {
     e.preventDefault();
     return cycle(e.code === 'BracketRight' ? 1 : -1);
   }
-  if (e.altKey && e.code === 'Backslash') { e.preventDefault(); return schedule(true); }
+  if ((e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'Space') || (e.altKey && e.code === 'Backslash')) {
+    e.preventDefault();
+    return schedule(true, true);
+  }
   if (suggestions.length && caret() === ghostPos) {
     if (e.key === 'Tab' && plain) { e.preventDefault(); return acceptAll(); }
     if (e.key === 'ArrowRight' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); return acceptWord(); }
@@ -405,6 +413,7 @@ $('pasteAdd').onclick = () => {
 const dlg = $('settings');
 function syncSettingsForm() {
   $('optEnabled').value = settings.enabled ? 'on' : 'off';
+  $('optAuto').value = settings.auto ? 'auto' : 'manual';
   $('optLength').value = settings.length;
   $('optDelay').value = settings.delay;
   $('delayVal').textContent = `(${settings.delay} ms)`;
@@ -417,6 +426,7 @@ $('optDelay').oninput = () => { $('delayVal').textContent = `(${$('optDelay').va
 dlg.addEventListener('close', () => {
   Object.assign(settings, {
     enabled: $('optEnabled').value === 'on',
+    auto: $('optAuto').value === 'auto',
     length: $('optLength').value,
     delay: Number($('optDelay').value),
     model: $('optModel').value.trim(),
@@ -438,7 +448,8 @@ function setStatus(kind, detail = '') {
   const text = kind === 'busy' ? `${label} · thinking…`
     : kind === 'err' ? detail
     : !settings.enabled ? 'Suggestions off'
-    : detail ? `${label} · ${detail}` : label;
+    : detail ? `${label} · ${detail}`
+    : settings.auto ? label : `${label} · Ctrl+Space to suggest`;
   $('statusText').textContent = text;
   el.title = text;
 }
