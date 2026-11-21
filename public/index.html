@@ -12,6 +12,7 @@
     <div class="status" id="status" title="Completion status"><span class="dot"></span><span id="statusText">Starting…</span></div>
     <nav class="actions">
       <button id="btnContext" class="btn" aria-controls="contextPanel">Context <span id="ctxCount" class="badge">0</span></button>
+      <button id="btnLog" class="btn" aria-controls="logPanel">Log</button>
       <button id="btnOpen" class="btn">Open</button>
       <button id="btnSave" class="btn">Save</button>
       <button id="btnSettings" class="btn">Settings</button>
@@ -55,6 +56,20 @@
     </details>
     <ul class="docs" id="docs"></ul>
     <p class="muted small" id="ctxSize"></p>
+  </aside>
+
+  <aside class="panel" id="logPanel" hidden>
+    <div class="panel-head">
+      <h2>Suggestion log</h2>
+      <button class="icon" data-close aria-label="Close">×</button>
+    </div>
+    <p class="muted">Every suggestion the model sends back is saved to <code>logs/suggestions.jsonl</code> next to the app. Token counts come from Gemini when it reports them; numbers marked ~ are estimates (about 4 characters per token).</p>
+    <div class="log-totals" id="logTotals"></div>
+    <div class="log-actions">
+      <button id="logRefresh" class="btn">Refresh</button>
+      <a class="btn" href="/api/log/download" download>Download</a>
+    </div>
+    <ol class="log" id="logList"></ol>
   </aside>
 
   <dialog id="settings">
