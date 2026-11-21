@@ -10,7 +10,7 @@ export function createMockProvider() {
   return {
     name: 'mock',
     model: 'mock',
-    async complete({ user, signal, n = 1 }) {
+    async complete({ user, signal, n = 1, temperature }) {
       await new Promise((r, j) => {
         const t = setTimeout(r, 120);
         signal?.addEventListener('abort', () => { clearTimeout(t); j(Object.assign(new Error('aborted'), { name: 'AbortError' })); });
@@ -22,7 +22,11 @@ export function createMockProvider() {
         const w = words.find((x) => x.startsWith(partial.toLowerCase()) && x.length > partial.length);
         if (w) return { texts: [w.slice(partial.length)] };
       }
-      const start = before.length % LINES.length;
+      let start = before.length % LINES.length;
+      // MOCK_DUPES=1 imitates a model that returns identical candidates, so
+      // the server's top-up path can be exercised.
+      if (process.env.MOCK_DUPES && n > 1) return { texts: Array(n).fill(LINES[start]) };
+      if (temperature >= 1) start = Math.floor(Math.random() * LINES.length);
       return { texts: Array.from({ length: n }, (_, i) => LINES[(start + i) % LINES.length]) };
     },
   };

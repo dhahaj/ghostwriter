@@ -7,19 +7,20 @@ export function createGeminiProvider({ apiKey, model }) {
   return {
     name: 'gemini',
     model: defaultModel,
-    async complete({ system, user, maxTokens, signal, apiKey: keyOverride, model: modelOverride, n = 1 }) {
+    async complete({ system, user, maxTokens, signal, apiKey: keyOverride, model: modelOverride, n = 1, temperature }) {
       const key = keyOverride || apiKey;
       if (!key) throw httpError(401, 'No Gemini API key. Set GEMINI_API_KEY in .env or paste a key in Settings.');
       const m = modelOverride || defaultModel;
       const call = (count, temperature) => generate({ key, m, system, user, maxTokens, signal, count, temperature });
-      if (n <= 1) return call(1, 0.4);
+      if (n <= 1) return call(1, temperature ?? 0.4);
       // Alternatives: ask for several candidates in one call (higher temperature
       // for variety). Some models reject candidateCount > 1; fall back to
       // parallel single calls.
       try {
         return await call(n, 0.9);
       } catch (err) {
-        if (err.name === 'AbortError' || !/candidate/i.test(err.message)) throw err;
+        // Any 400 here (e.g. "multiple candidates not supported") -> fall back.
+        if (err.name === 'AbortError' || (err.status !== 400 && !/candidate/i.test(err.message))) throw err;
         const outs = await Promise.all(Array.from({ length: n }, () => call(1, 0.9)));
         return { texts: outs.flatMap((o) => o.texts), usage: outs[0]?.usage };
       }
