@@ -28,7 +28,7 @@ Try the UI without a key: `npm run mock`.
 | Ctrl/⌘ + → | Accept the next word |
 | Alt + ] / Alt + [ | Next / previous alternative suggestion |
 | Esc | Dismiss |
-| Alt + \ | Ask for a suggestion now |
+| Ctrl + Space (or Alt + \) | Ask for a suggestion now, anywhere in the text |
 | Ctrl/⌘ + Z | Undo an accept |
 
 Typing the same characters as the suggestion keeps it on screen without a new request.
@@ -55,7 +55,8 @@ implicit caching can reuse them between keystrokes, which cuts cost and latency.
 
 ## Settings
 
-Suggestions on/off, length (phrase, sentence, a few sentences), delay, model
+Suggestions on/off, when to suggest (automatically as you type, or only on
+Ctrl + Space), length (phrase, sentence, a few sentences), delay, model
 override (default `GEMINI_MODEL`, else `gemini-2.5-flash-lite`), an optional
 browser-side API key, and standing instructions such as "British spelling,
 warm tone".
