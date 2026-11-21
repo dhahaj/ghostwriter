@@ -27,6 +27,8 @@ let reqSeq = 0;
 let accepting = false;
 const cache = new Map(); // prefix-key -> string[] (small LRU)
 const ALTS = 4;          // how many alternatives to ask for when cycling
+// suggestion text (as currently shown) -> { id, full } so accepts can be logged
+let origin = new Map();
 
 const current = () => suggestions[idx] || '';
 let ghost = '';          // mirrors current(); kept for readability below
@@ -114,7 +116,10 @@ async function fetchCompletions(before, after, n, signal, exclude = []) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return { texts: data.texts || (data.text ? [data.text] : []), ms: data.ms, cachedTokens: data.cachedTokens };
+  const texts = data.texts || (data.text ? [data.text] : []);
+  for (const t of texts) if (data.id) origin.set(t, { id: data.id, full: t });
+  if (origin.size > 500) origin = new Map([...origin].slice(-200));
+  return { texts, ms: data.ms, cachedTokens: data.cachedTokens, inputTokens: data.inputTokens, outputTokens: data.outputTokens, estimated: data.estimated };
 }
 
 async function request(pos) {
@@ -138,7 +143,7 @@ async function request(pos) {
     // Drop stale answers: the text or caret moved while we waited.
     if (seq !== reqSeq || ta.value !== v || caret() !== pos) return;
     setSuggestions(out.texts, pos);
-    setStatus('ok', out.texts.length ? `${out.ms} ms${out.cachedTokens ? ` · ${out.cachedTokens} cached tokens` : ''}` : 'no suggestion');
+    setStatus('ok', out.texts.length ? `${out.ms} ms · ${tokenNote(out)}` : 'no suggestion');
   } catch (err) {
     if (err.name === 'AbortError') return;
     setStatus('err', err.message);
@@ -181,7 +186,7 @@ async function cycle(dir) {
         if (ctl.signal.aborted || ta.value !== v || caret() !== pos) return;
         const list = mergeAlts(suggestions, out.texts);
         setSuggestions(list, pos, list.indexOf(shown), 'done');
-        setStatus('ok', list.length > 1 ? `${list.length} suggestions · ${out.ms} ms` : 'No other suggestions for this spot');
+        setStatus('ok', list.length > 1 ? `${list.length} suggestions · ${out.ms} ms · ${tokenNote(out)}` : 'No other suggestions for this spot');
       } catch (err) {
         if (err.name === 'AbortError') return;
         altsState = 'none';
@@ -207,6 +212,10 @@ function remember(key, texts) {
 function narrow(typed) {
   const shown = current().slice(typed.length);
   const list = suggestions.filter((s) => s.startsWith(typed)).map((s) => s.slice(typed.length)).filter(Boolean);
+  for (const s of suggestions) {
+    const o = origin.get(s);
+    if (o && s.startsWith(typed) && s.length > typed.length) origin.set(s.slice(typed.length), o);
+  }
   const pos = ghostPos + typed.length;
   setSuggestions(list, pos, Math.max(list.indexOf(shown), 0), altsState === 'loading' ? 'none' : altsState);
 }
@@ -222,10 +231,30 @@ function insert(text) {
     ta.dispatchEvent(new Event('input', { bubbles: true }));
   }
   accepting = false;
+  // The input handler skips while accepting, so redraw here; otherwise the
+  // accepted text stays invisible until the next keystroke.
+  render();
+  save();
+}
+
+function logAccept(text, partial) {
+  const o = origin.get(current());
+  if (!o) return;
+  fetch('/api/log/accept', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: o.id, text: partial ? text : o.full, partial }),
+  }).catch(() => {});
+}
+
+function tokenNote(out) {
+  const t = (out.inputTokens || 0) + (out.outputTokens || 0);
+  return `${out.estimated ? '~' : ''}${t.toLocaleString()} tokens`;
 }
 
 function acceptAll() {
   const text = current();
+  logAccept(text, false);
   setSuggestions([]);
   insert(text);
   autosize();
@@ -236,6 +265,7 @@ function acceptWord() {
   const m = current().match(/^\s*\S+/);
   if (!m) return acceptAll();
   const part = m[0];
+  logAccept(part, true);
   narrow(part);
   const keep = { list: suggestions, i: idx, pos: ghostPos, alts: altsState };
   suggestions = [];
@@ -393,7 +423,7 @@ async function addFiles(files) {
   }
   persistDocs();
 }
-$('btnContext').onclick = () => { $('contextPanel').hidden = !$('contextPanel').hidden; };
+$('btnContext').onclick = () => { $('contextPanel').hidden = !$('contextPanel').hidden; $('logPanel').hidden = true; };
 $('contextPanel').querySelector('[data-close]').onclick = () => { $('contextPanel').hidden = true; ta.focus(); };
 $('fileCtx').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
 const drop = $('drop');
@@ -408,6 +438,62 @@ $('pasteAdd').onclick = () => {
   $('pasteName').value = '';
   persistDocs();
 };
+
+// ---------- suggestion log ----------
+async function loadLog() {
+  const list = $('logList');
+  try {
+    const { entries, totals } = await (await fetch('/api/log?limit=300')).json();
+    const fmt = (n) => Number(n || 0).toLocaleString();
+    $('logTotals').innerHTML = '';
+    for (const [value, label] of [
+      [fmt(totals.suggestions), 'suggestions'],
+      [fmt(totals.accepted), 'accepted'],
+      [fmt(totals.inputTokens + totals.outputTokens), 'tokens used'],
+    ]) {
+      const d = document.createElement('div');
+      d.innerHTML = '<b></b><span></span>';
+      d.firstChild.textContent = value;
+      d.lastChild.textContent = label;
+      $('logTotals').append(d);
+    }
+    list.textContent = '';
+    if (!entries.length) {
+      list.innerHTML = '<li class="empty">No suggestions yet. Start writing.</li>';
+      return;
+    }
+    for (const e of entries) {
+      const li = document.createElement('li');
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const est = e.estimated ? '~' : '';
+      meta.textContent = `${new Date(e.time).toLocaleString()} · ${e.model} · ${e.ms} ms · ${est}${fmt(e.inputTokens)} in / ${est}${fmt(e.outputTokens)} out`;
+      const ctx = document.createElement('div');
+      ctx.className = 'ctx';
+      ctx.textContent = '…' + (e.context || '').slice(-80);
+      li.append(meta, ctx);
+      for (const sug of e.suggestions) {
+        const row = document.createElement('div');
+        const took = e.accepted.some((a) => a === sug.text || sug.text.startsWith(a));
+        row.className = 'sug' + (took ? ' took' : '');
+        row.innerHTML = '<span class="t"></span><span class="tok"></span>';
+        row.firstChild.textContent = sug.text;
+        row.lastChild.textContent = `~${sug.tokens} tok`;
+        li.append(row);
+      }
+      list.append(li);
+    }
+  } catch {
+    list.innerHTML = '<li class="empty">Could not load the log.</li>';
+  }
+}
+$('btnLog').onclick = () => {
+  const panel = $('logPanel');
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) { $('contextPanel').hidden = true; loadLog(); }
+};
+$('logPanel').querySelector('[data-close]').onclick = () => { $('logPanel').hidden = true; ta.focus(); };
+$('logRefresh').onclick = loadLog;
 
 // ---------- settings ----------
 const dlg = $('settings');

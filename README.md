@@ -61,6 +61,19 @@ override (default `GEMINI_MODEL`, else `gemini-2.5-flash-lite`), an optional
 browser-side API key, and standing instructions such as "British spelling,
 warm tone".
 
+## Suggestion log
+
+Every suggestion the model returns is appended to `logs/suggestions.jsonl`
+(git-ignored; set `LOG_FILE` to put it elsewhere). Each line records the time,
+model, latency, the last bit of text before the cursor, every suggestion with a
+rough token size, and the request's input/output tokens. Gemini reports real
+token counts; when a provider doesn't, they're estimated at ~4 characters per
+token and marked `estimated`. Pressing Tab adds an `accept` line, so you can see
+which suggestions you actually used.
+
+Open **Log** in the app to browse recent entries and totals, or download the
+whole file. The status bar also shows each request's token count.
+
 ## Swapping the model provider
 
 Providers live in `src/providers/`. Each exports a factory returning
@@ -74,6 +87,7 @@ by every provider.
 ```
 server.js              static files + POST /api/complete
 src/prompt.js          prompt building and output cleanup
+src/log.js             suggestion log (JSONL) and token estimates
 src/providers/         gemini.js, mock.js, index.js (registry)
 public/                index.html, app.js (editor + ghost text), style.css
 test/                  npm test

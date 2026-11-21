@@ -22,7 +22,7 @@ export function createGeminiProvider({ apiKey, model }) {
         // Any 400 here (e.g. "multiple candidates not supported") -> fall back.
         if (err.name === 'AbortError' || (err.status !== 400 && !/candidate/i.test(err.message))) throw err;
         const outs = await Promise.all(Array.from({ length: n }, () => call(1, 0.9)));
-        return { texts: outs.flatMap((o) => o.texts), usage: outs[0]?.usage };
+        return { texts: outs.flatMap((o) => o.texts), usage: addUsage(outs.map((o) => o.usage)) };
       }
     },
   };
@@ -58,6 +58,13 @@ async function generate({ key, m, system, user, maxTokens, signal, count, temper
   const texts = (data?.candidates || []).map((c) =>
     (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || '').join(''));
   return { texts, usage: data?.usageMetadata };
+}
+
+function addUsage(list) {
+  const keys = ['promptTokenCount', 'candidatesTokenCount', 'cachedContentTokenCount', 'totalTokenCount'];
+  const out = {};
+  for (const u of list) for (const k of keys) if (u?.[k]) out[k] = (out[k] || 0) + u[k];
+  return Object.keys(out).length ? out : undefined;
 }
 
 function httpError(status, message) {

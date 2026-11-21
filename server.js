@@ -7,6 +7,8 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createProvider } from './src/providers/index.js';
 import { buildPrompt, cleanCompletion } from './src/prompt.js';
+import { createLog, estimateTokens, sumUsage } from './src/log.js';
+import { randomUUID } from 'node:crypto';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 loadDotEnv(join(root, '.env'));
@@ -17,11 +19,28 @@ const provider = createProvider(process.argv.includes('--mock') ? 'mock' : proce
 const PUBLIC = join(root, 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const MAX_BODY = 2_000_000;
+const log = createLog(process.env.LOG_FILE || join(root, 'logs', 'suggestions.jsonl'));
 
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://x');
     if (req.method === 'POST' && url.pathname === '/api/complete') return await handleComplete(req, res);
+    if (req.method === 'GET' && url.pathname === '/api/log') {
+      return json(res, 200, await log.read(Math.min(Number(url.searchParams.get('limit')) || 300, 5000)));
+    }
+    if (req.method === 'GET' && url.pathname === '/api/log/download') {
+      let data = '';
+      try { data = await readFile(log.file, 'utf8'); } catch {}
+      res.writeHead(200, { 'content-type': 'application/x-ndjson', 'content-disposition': 'attachment; filename="ghostwriter-suggestions.jsonl"' });
+      return res.end(data);
+    }
+    if (req.method === 'POST' && url.pathname === '/api/log/accept') {
+      const b = await readJson(req);
+      if (typeof b.id === 'string' && typeof b.text === 'string') {
+        await log.append({ type: 'accept', id: b.id.slice(0, 64), text: b.text.slice(0, 2000), partial: !!b.partial });
+      }
+      return json(res, 200, { ok: true });
+    }
     if (req.method === 'GET' && url.pathname === '/api/status') {
       return json(res, 200, { provider: provider.name, model: provider.model, hasServerKey: provider.name !== 'gemini' || !!process.env.GEMINI_API_KEY });
     }
@@ -55,6 +74,7 @@ async function handleComplete(req, res) {
     const fresh = (list) => list.filter((t) => !exclude.has(t));
 
     const out = await provider.complete({ ...opts, n });
+    const usages = [out.usage];
     let texts = [...new Set(clean(out.texts))];
 
     // Alternatives: models often return duplicates (or a single candidate) for
@@ -67,11 +87,27 @@ async function handleComplete(req, res) {
           if (ac.signal.aborted) throw err;
           return { texts: [] };
         })));
+      usages.push(...more.map((o) => o.usage));
       texts = [...new Set([...texts, ...clean(more.flatMap((o) => o.texts || []))])];
     }
     if (n > 1) texts = fresh(texts);
 
-    json(res, 200, { texts, text: texts[0] || '', ms: Math.round(performance.now() - t0), cachedTokens: out.usage?.cachedContentTokenCount || 0 });
+    const ms = Math.round(performance.now() - t0);
+    // Real token counts when the provider reports them, otherwise ~4 chars/token.
+    const usage = sumUsage(usages);
+    const inputTokens = usage.known ? usage.input : estimateTokens(prompt.system + prompt.user);
+    const outputTokens = usage.known && usage.output ? usage.output : texts.reduce((a, t) => a + estimateTokens(t), 0);
+    const suggestions = texts.map((text) => ({ text, tokens: estimateTokens(text) }));
+    const id = randomUUID();
+    if (texts.length) {
+      log.append({
+        type: 'suggest', id, provider: provider.name, model: opts.model || provider.model, n, ms,
+        inputTokens, outputTokens, cachedTokens: usage.cached, estimated: !usage.known,
+        context: String(body.before || '').slice(-120),
+        suggestions,
+      });
+    }
+    json(res, 200, { id, texts, text: texts[0] || '', suggestions, ms, inputTokens, outputTokens, cachedTokens: usage.cached, estimated: !usage.known });
   } catch (err) {
     if (ac.signal.aborted || err.name === 'AbortError') return; // client is gone
     json(res, err.status || 500, { error: err.message || 'Completion failed' });
